@@ -171,4 +171,5 @@ jobs:
 
           UPDATED_BODY="${EXISTING}${DOCKER_NOTES}"
 
-          gh release edit "$TAG" --notes "$UPDATED_BODY"
+          echo "$UPDATED_BODY" > /tmp/release_notes.md
+          gh release edit "$TAG" --notes-file /tmp/release_notes.md
