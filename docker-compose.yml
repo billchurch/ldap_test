@@ -1,0 +1,45 @@
+x-common-env: &common-env
+  LDAP_URI: ${LDAP_URI:-ldap://192.168.10.116}
+  LDAP_BASE: ${LDAP_BASE:-DC=mydomain,DC=local}
+  LDAP_BINDDN: ${LDAP_BINDDN:-CN=Administrator,CN=Users,DC=mydomain,DC=local}
+  LDAP_BINDPW: ${LDAP_BINDPW:-Password123}
+
+services:
+  debian:
+    build:
+      context: .
+      dockerfile: debian/Dockerfile
+    image: ldap-test-debian:latest
+    container_name: ldap-test-debian
+    hostname: ldap-test-debian
+    ports:
+      - "2201:22"
+    environment:
+      <<: *common-env
+    restart: unless-stopped
+
+  rocky:
+    build:
+      context: .
+      dockerfile: rocky/Dockerfile
+    image: ldap-test-rocky:latest
+    container_name: ldap-test-rocky
+    hostname: ldap-test-rocky
+    ports:
+      - "2202:22"
+    environment:
+      <<: *common-env
+    restart: unless-stopped
+
+  ubuntu:
+    build:
+      context: .
+      dockerfile: ubuntu/Dockerfile
+    image: ldap-test-ubuntu:latest
+    container_name: ldap-test-ubuntu
+    hostname: ldap-test-ubuntu
+    ports:
+      - "2203:22"
+    environment:
+      <<: *common-env
+    restart: unless-stopped
