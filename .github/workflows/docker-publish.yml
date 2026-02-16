@@ -3,6 +3,18 @@ name: Docker Publish
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.0)'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.0)'
+        required: true
+        type: string
 
 env:
   REGISTRY: ghcr.io
@@ -46,8 +58,10 @@ jobs:
       - name: Extract version parts
         id: version
         env:
-          TAG_NAME: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
+          TAG_NAME="${RELEASE_TAG:-$INPUT_TAG}"
           VERSION="${TAG_NAME}"
           VERSION="${VERSION#v}"
           MAJOR="${VERSION%%.*}"
@@ -101,8 +115,10 @@ jobs:
       - name: Extract version
         id: version
         env:
-          TAG_NAME: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
+          TAG_NAME="${RELEASE_TAG:-$INPUT_TAG}"
           VERSION="${TAG_NAME}"
           VERSION="${VERSION#v}"
           echo "full=${VERSION}" >> "$GITHUB_OUTPUT"
@@ -111,13 +127,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-          TAG_NAME: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
           VERSION: ${{ steps.version.outputs.full }}
           REPO_NAME: ${{ github.repository }}
         run: |
           IMAGE="ghcr.io/${REPO_NAME}"
           IMAGE=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
-          TAG="${TAG_NAME}"
+          TAG="${RELEASE_TAG:-$INPUT_TAG}"
 
           MAJOR="${VERSION%%.*}"
           MINOR_PART="${VERSION#*.}"
