@@ -1,0 +1,174 @@
+name: Docker Publish
+
+on:
+  release:
+    types: [published]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [debian, rocky, ubuntu]
+        include:
+          - distro: debian
+            is_default: true
+          - distro: rocky
+            is_default: false
+          - distro: ubuntu
+            is_default: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version parts
+        id: version
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION="${TAG_NAME}"
+          VERSION="${VERSION#v}"
+          MAJOR="${VERSION%%.*}"
+          MINOR="${VERSION#*.}"
+          MINOR="${MINOR%%.*}"
+          echo "full=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "major=${MAJOR}" >> "$GITHUB_OUTPUT"
+          echo "minor=${MAJOR}.${MINOR}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate tags
+        id: tags
+        env:
+          DISTRO: ${{ matrix.distro }}
+          IS_DEFAULT: ${{ matrix.is_default }}
+          VERSION_FULL: ${{ steps.version.outputs.full }}
+          VERSION_MAJOR: ${{ steps.version.outputs.major }}
+          VERSION_MINOR: ${{ steps.version.outputs.minor }}
+        run: |
+          IMAGE="${REGISTRY}/${IMAGE_NAME}"
+          IMAGE=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
+
+          TAGS="${IMAGE}:${DISTRO}"
+          TAGS="${TAGS},${IMAGE}:${DISTRO}-${VERSION_FULL}"
+          TAGS="${TAGS},${IMAGE}:${DISTRO}-${VERSION_MINOR}"
+          TAGS="${TAGS},${IMAGE}:${DISTRO}-${VERSION_MAJOR}"
+
+          if [ "${IS_DEFAULT}" = "true" ]; then
+            TAGS="${TAGS},${IMAGE}:latest"
+            TAGS="${TAGS},${IMAGE}:${VERSION_FULL}"
+            TAGS="${TAGS},${IMAGE}:${VERSION_MINOR}"
+            TAGS="${TAGS},${IMAGE}:${VERSION_MAJOR}"
+          fi
+
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.distro }}/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha,scope=${{ matrix.distro }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.distro }}
+
+  update-release-notes:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract version
+        id: version
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION="${TAG_NAME}"
+          VERSION="${VERSION#v}"
+          echo "full=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Update release notes with Docker info
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+          VERSION: ${{ steps.version.outputs.full }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          IMAGE="ghcr.io/${REPO_NAME}"
+          IMAGE=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
+          TAG="${TAG_NAME}"
+
+          MAJOR="${VERSION%%.*}"
+          MINOR_PART="${VERSION#*.}"
+          MINOR="${MAJOR}.${MINOR_PART%%.*}"
+
+          EXISTING=$(gh release view "$TAG" --json body -q .body)
+
+          # Get package name from repo (everything after /)
+          PKG_NAME="${REPO_NAME#*/}"
+
+          DOCKER_NOTES=$(cat <<INNEREOF
+
+          ---
+
+          ## Docker Images
+
+          This release is available as multi-platform Docker images (linux/amd64, linux/arm64):
+
+          ### GitHub Container Registry
+
+          **Default (Debian):**
+          \`\`\`bash
+          docker pull ${IMAGE}:latest
+          docker pull ${IMAGE}:${VERSION}
+          docker pull ${IMAGE}:${MINOR}
+          docker pull ${IMAGE}:${MAJOR}
+          \`\`\`
+
+          **Debian:**
+          \`\`\`bash
+          docker pull ${IMAGE}:debian
+          docker pull ${IMAGE}:debian-${VERSION}
+          \`\`\`
+
+          **Rocky Linux:**
+          \`\`\`bash
+          docker pull ${IMAGE}:rocky
+          docker pull ${IMAGE}:rocky-${VERSION}
+          \`\`\`
+
+          **Ubuntu:**
+          \`\`\`bash
+          docker pull ${IMAGE}:ubuntu
+          docker pull ${IMAGE}:ubuntu-${VERSION}
+          \`\`\`
+
+          **Links:**
+          - [GitHub Container Registry](https://github.com/${REPO_NAME}/pkgs/container/${PKG_NAME})
+          INNEREOF
+          )
+
+          UPDATED_BODY="${EXISTING}${DOCKER_NOTES}"
+
+          gh release edit "$TAG" --notes "$UPDATED_BODY"
